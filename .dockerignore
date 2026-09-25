@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.git/
+.pytest_cache/
+data/raw/*
+data/images/*
+data/processed/*
+storage/
+evaluation/datasets/coco_subset/
+evaluation/results/*.json
+*.duckdb
+*.faiss
+*.index
+.env

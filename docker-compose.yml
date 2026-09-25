@@ -1,0 +1,41 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    # No GPU requested by default for portability; add a `deploy.resources.reservations.devices`
+    # NVIDIA block here if the host has the NVIDIA Container Toolkit installed.
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: ["python", "-m", "app.api"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/srv/data
+      - ./storage:/srv/storage
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - LLM_MODEL=llama3.2:3b
+      - LLM_FALLBACK_MODEL=qwen2.5:latest
+    depends_on:
+      - ollama
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: ["streamlit", "run", "frontend/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+    ports:
+      - "8501:8501"
+    environment:
+      - API_BASE=http://api:8000
+    depends_on:
+      - api
+
+volumes:
+  ollama_models:
