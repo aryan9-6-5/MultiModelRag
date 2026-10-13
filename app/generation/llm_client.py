@@ -68,7 +68,7 @@ class GroqClient:
         import os
 
         self.api_key = os.getenv("GROQ_API_KEY", "")
-        self.model = model or os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+        self.model = model or os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
     def _available_models(self) -> set[str]:
         if not self.api_key:

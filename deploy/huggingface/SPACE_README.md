@@ -10,7 +10,7 @@ pinned: false
 
 Text-image retrieval-augmented generation. OpenCLIP embeddings in a shared text/image
 space, FAISS vector search, DuckDB metadata, a cross-modal reranker, and grounded
-answers from Llama 3.3 70B on Groq. FastAPI backend, Streamlit frontend.
+answers from gpt-oss-120b on Groq. FastAPI backend, Streamlit frontend.
 
 The demo index holds 100 random MS-COCO val2017 images (captioned with BLIP). Try
 queries such as "a person riding a bike" or "a plate of food". Uploads are disabled
