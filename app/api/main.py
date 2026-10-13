@@ -2,11 +2,14 @@
 run with `python -m app.api` or `uvicorn app.api.main:app`."""
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
+import time
+from collections import defaultdict, deque
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.schemas import (
@@ -16,10 +19,32 @@ from app.api.schemas import (
 from app.api.state import get_database, get_image_index, get_retriever, get_text_index, save_indexes
 from app.embeddings.clip_embedder import get_embedder
 from app.generation.generator import generate_answer
-from app.generation.llm_client import OllamaClient
+from app.generation.llm_client import get_llm_client
 from app.ingestion.pipeline import ingest_path
 
 app = FastAPI(title="MultimodalRAG API", version="0.1.0")
+
+# Public-demo protections (off by default). DEMO_MODE=true disables uploads and
+# rate-limits the endpoints that cost compute or LLM quota, per client IP.
+DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() in {"1", "true", "yes"}
+_hits: dict = defaultdict(deque)
+
+
+def _rate_limit(scope: str, limit: int, window_s: int = 3600):
+    def dep(request: Request) -> None:
+        if not DEMO_MODE:
+            return
+        forwarded = request.headers.get("x-forwarded-for", "")
+        ip = forwarded.split(",")[0].strip() or (request.client.host if request.client else "unknown")
+        now, q = time.monotonic(), _hits[f"{scope}:{ip}"]
+        while q and now - q[0] > window_s:
+            q.popleft()
+        if len(q) >= limit:
+            raise HTTPException(status_code=429, detail=f"Demo rate limit: {limit} {scope} requests per hour.")
+        q.append(now)
+
+    return dep
+
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
@@ -38,7 +63,7 @@ def _to_evidence_item(r) -> EvidenceItem:
 def health() -> HealthResponse:
     ollama_ok = True
     try:
-        OllamaClient()._available_models()
+        get_llm_client()._available_models()
     except Exception:
         ollama_ok = False
     return HealthResponse(status="ok", ollama_reachable=ollama_ok, embedding_device=get_embedder().device)
@@ -56,6 +81,8 @@ def stats() -> StatsResponse:
 
 @app.post("/ingest", response_model=list[IngestResponse])
 async def ingest(file: UploadFile = File(...)) -> list[IngestResponse]:
+    if DEMO_MODE:
+        raise HTTPException(status_code=403, detail="Uploads are disabled in the public demo; it ships with a COCO image subset.")
     # Use a tmpdir (not NamedTemporaryFile) so the file keeps its original name —
     # ingest_path/_store_raw_copy derive `source`/`file_path` from the path's name,
     # and losing the original filename here would make every ingested document
@@ -80,7 +107,7 @@ async def ingest(file: UploadFile = File(...)) -> list[IngestResponse]:
     ]
 
 
-@app.post("/search", response_model=SearchResponse)
+@app.post("/search", response_model=SearchResponse, dependencies=[Depends(_rate_limit("search", 120))])
 def search(req: SearchRequest) -> SearchResponse:
     if not req.query_text:
         raise HTTPException(status_code=400, detail="query_text is required")
@@ -92,7 +119,7 @@ def search(req: SearchRequest) -> SearchResponse:
     return SearchResponse(results=[_to_evidence_item(r) for r in results], latency_ms=latency_ms)
 
 
-@app.post("/query", response_model=QueryResponse)
+@app.post("/query", response_model=QueryResponse, dependencies=[Depends(_rate_limit("query", 30))])
 def query(req: QueryRequest) -> QueryResponse:
     retriever = get_retriever()
     evidence, retrieval_latency_ms = retriever.search_with_logging(

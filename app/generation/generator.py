@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from app.database.db import Database
-from app.generation.llm_client import GenerationError, OllamaClient
+from app.generation.llm_client import GenerationError, OllamaClient, get_llm_client
 from app.generation.prompt import build_prompt
 from app.retrieval.retriever import RetrievalResult
 
@@ -29,7 +29,7 @@ def generate_answer(
     query_id: Optional[str] = None,
     client: Optional[OllamaClient] = None,
 ) -> GenerationResponse:
-    client = client or OllamaClient()
+    client = client or get_llm_client()
     prompt = build_prompt(query, evidence)
 
     start = time.perf_counter()

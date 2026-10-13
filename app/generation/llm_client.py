@@ -55,3 +55,57 @@ class OllamaClient:
             "prompt_tokens": data.get("prompt_eval_count"),
             "completion_tokens": data.get("eval_count"),
         }
+
+
+class GroqClient:
+    """Hosted alternative to Ollama for deployments without a local LLM server.
+    Talks to Groq's OpenAI-compatible chat completions endpoint. Selected with
+    LLM_PROVIDER=groq; needs GROQ_API_KEY."""
+
+    BASE_URL = "https://api.groq.com/openai/v1"
+
+    def __init__(self, model: str | None = None):
+        import os
+
+        self.api_key = os.getenv("GROQ_API_KEY", "")
+        self.model = model or os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+    def _available_models(self) -> set[str]:
+        if not self.api_key:
+            raise GenerationError("GROQ_API_KEY is not set")
+        return {self.model}
+
+    def generate(self, prompt: str, temperature: float = 0.2) -> dict:
+        self._available_models()
+        try:
+            resp = httpx.post(
+                f"{self.BASE_URL}/chat/completions",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json={
+                    "model": self.model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": temperature,
+                },
+                timeout=settings.generation_timeout_s,
+            )
+            resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise GenerationError(f"Groq generation failed: {exc}") from exc
+
+        data = resp.json()
+        usage = data.get("usage", {})
+        return {
+            "text": data["choices"][0]["message"]["content"],
+            "model": self.model,
+            "prompt_tokens": usage.get("prompt_tokens"),
+            "completion_tokens": usage.get("completion_tokens"),
+        }
+
+
+def get_llm_client():
+    """Ollama by default (local, no key); Groq when LLM_PROVIDER=groq."""
+    import os
+
+    if os.getenv("LLM_PROVIDER", "ollama").lower() == "groq":
+        return GroqClient()
+    return OllamaClient()
